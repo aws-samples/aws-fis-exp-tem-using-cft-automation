@@ -1,0 +1,78 @@
+AWSTemplateFormatVersion: "2010-09-09"
+
+Description: AWS CloudFormation - aws fis experiment - ec2 stop and start template.
+
+Metadata: 
+  AWS::CloudFormation::Interface: 
+    ParameterGroups: 
+      - 
+        Label: 
+          default: "Experiment Configuration"
+        Parameters: 
+          - FISExperimentTemplateName
+          - EC2InstanceID
+          - FISEC2AccessManagedPolicy
+      - 
+        Label: 
+          default: "Experiment Duration Configuration"
+        Parameters: 
+          - FISActionMins
+
+Parameters:
+     EC2InstanceID:
+          Type: AWS::EC2::Instance::Id
+          Description: ARN of EC2 instance
+
+     FISExperimentTemplateName:
+          Type: String
+          Description: Name of experiment template
+
+     FISEC2AccessManagedPolicy:
+        Type: String
+        Description: AWS Managed Policy
+        Default: arn:aws:iam::aws:policy/service-role/AWSFaultInjectionSimulatorEC2Access
+
+     FISActionMins:
+        Type: Number
+        Description: FIS Action Duration in minutes
+        Default: 2
+        MinValue: 0
+        MaxValue: 60
+
+Resources:
+  ExperimentTemplate:
+    Type: 'AWS::FIS::ExperimentTemplate'
+    Properties: 
+      Description: 'stop a specific instance'
+      Actions: 
+        stopInstances:
+          ActionId: 'aws:ec2:stop-instances'
+          Parameters: 
+            startInstancesAfterDuration: !Sub PT${FISActionMins}M
+          Targets:
+            Instances: oneRandomInstance
+      Targets: 
+        oneRandomInstance:
+          ResourceType: 'aws:ec2:instance'
+          SelectionMode: 'COUNT(1)'
+          ResourceArns:
+               - !Sub arn:${AWS::Partition}:ec2:${AWS::Region}:${AWS::AccountId}:instance/${EC2InstanceID}
+      StopConditions:
+        - Source: 'none'
+      Tags: 
+        Name: !Ref FISExperimentTemplateName
+      RoleArn: !GetAtt FISRole.Arn
+  FISRole:
+    Type: 'AWS::IAM::Role'
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement: 
+          - Effect: Allow
+            Principal:
+              Service: 'fis.amazonaws.com'
+            Action: 'sts:AssumeRole'
+      ManagedPolicyArns:
+           - !Ref FISEC2AccessManagedPolicy
+
+ 

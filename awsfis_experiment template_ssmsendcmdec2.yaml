@@ -1,0 +1,110 @@
+AWSTemplateFormatVersion: "2010-09-09"
+
+Description: AWS CloudFormation - aws fis experiment - ssm send cmd ec2 template.
+
+Metadata: 
+  AWS::CloudFormation::Interface: 
+    ParameterGroups: 
+      - 
+        Label: 
+          default: "Experiment & Subnet Configuration"
+        Parameters: 
+          - FISExperimentTemplateName
+          - InstanceID
+          - FISEC2AccessManagedPolicy
+      - 
+        Label: 
+          default: "Experiment Duration Configuration"
+        Parameters: 
+          - FISActionHours
+          - FISActionMins
+          - FISActionSecs
+
+Parameters:
+     InstanceID:
+          Type: AWS::EC2::Instance::Id
+          Description: ID of Instance
+
+     FISExperimentTemplateName:
+          Type: String
+          Description: Name of experiment template
+
+     FISEC2AccessManagedPolicy:
+        Type: String
+        Description: AWS Managed Policy
+        Default: arn:aws:iam::aws:policy/AmazonEC2FullAccess
+
+     FISSSMAccessManagedPolicy:
+        Type: String
+        Description: AWS Managed Policy
+        Default: arn:aws:iam::aws:policy/service-role/AWSFaultInjectionSimulatorSSMAccess
+
+     FISActionHours:
+        Type: Number
+        Description: FIS Action Duration in hours
+        Default: 0
+        MinValue: 0
+        MaxValue: 11
+
+     FISActionMins:
+        Type: Number
+        Description: FIS Action Duration in minutes
+        Default: 2
+        MinValue: 0
+        MaxValue: 59
+
+     FISActionSecs:
+        Type: Number
+        Description: FIS Action Duration in seconds
+        Default: 0
+        MinValue: 0
+        MaxValue: 59
+
+Resources:
+  ExperimentTemplate:
+    Type: 'AWS::FIS::ExperimentTemplate'
+    Properties: 
+      Description: 'send ssm command for a specific instance'
+      Actions: 
+        crashSapHanaKernel:
+          ActionId: 'aws:ssm:send-command'
+          Parameters:
+            duration: !Sub PT${FISActionHours}H${FISActionMins}M${FISActionSecs}S
+            documentArn: !Sub arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:document/${FISSSMDoc}
+          Targets:
+            Instances: targetInstance
+      Targets: 
+        targetInstance:
+          ResourceType: 'aws:ec2:instance'
+          SelectionMode: 'COUNT(1)'
+          ResourceArns:
+               - !Sub arn:${AWS::Partition}:ec2:${AWS::Region}:${AWS::AccountId}:instance/${InstanceID}
+      StopConditions:
+        - Source: 'none'
+      Tags: 
+        Name: !Ref FISExperimentTemplateName
+      RoleArn: !GetAtt FISRole.Arn
+  FISRole:
+    Type: 'AWS::IAM::Role'
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement: 
+          - Effect: Allow
+            Principal:
+              Service: 'fis.amazonaws.com'
+            Action: 'sts:AssumeRole'
+      ManagedPolicyArns:
+           - !Ref FISEC2AccessManagedPolicy
+           - !Ref FISSSMAccessManagedPolicy
+  FISSSMDoc:
+    Type: AWS::SSM::Document
+    Properties:
+         Content:
+              {"schemaVersion": "2.2","mainSteps": [{"action": "aws:runShellScript","name": "inducekernelpanic","inputs": {"runCommand": ["if [ -z \"$KernelVersion\" ]; then echo \"Inducing kernel panic in currently running kernel...\"; echo c > /proc/sysrq-trigger; else echo \"Inducing kernel panic in kernel version $KernelVersion...\"; grubby --set-default-index=$(grubby --info=$KernelVersion | awk -F= '/index/ {print $2}') && reboot; fi"]}}]}
+         DocumentFormat: JSON
+         UpdateMethod: Replace
+         DocumentType: Command
+
+        
+ 

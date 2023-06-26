@@ -1,0 +1,94 @@
+AWSTemplateFormatVersion: "2010-09-09"
+
+Description: AWS CloudFormation - aws fis experiment - network disrupt connectivity template.
+
+Metadata: 
+  AWS::CloudFormation::Interface: 
+    ParameterGroups: 
+      - 
+        Label: 
+          default: "Experiment & Subnet Configuration"
+        Parameters: 
+          - FISExperimentTemplateName
+          - SubnetID
+          - FISNetworkManagedPolicy
+      - 
+        Label: 
+          default: "Experiment Duration Configuration"
+        Parameters: 
+          - FISActionHours
+          - FISActionMins
+          - FISActionSecs
+
+Parameters:
+     SubnetID:
+          Type: AWS::EC2::Subnet::Id
+          Description: ID of Subnet
+
+     FISExperimentTemplateName:
+          Type: String
+          Description: Name of experiment template
+
+     FISNetworkManagedPolicy:
+        Type: String
+        Description: AWS Managed Policy
+        Default: arn:aws:iam::aws:policy/service-role/AWSFaultInjectionSimulatorNetworkAccess
+
+     FISActionHours:
+        Type: Number
+        Description: FIS Action Duration in hours
+        Default: 0
+        MinValue: 0
+        MaxValue: 11
+
+     FISActionMins:
+        Type: Number
+        Description: FIS Action Duration in minutes
+        Default: 2
+        MinValue: 0
+        MaxValue: 59
+
+     FISActionSecs:
+        Type: Number
+        Description: FIS Action Duration in seconds
+        Default: 0
+        MinValue: 0
+        MaxValue: 59
+
+Resources:
+  ExperimentTemplate:
+    Type: 'AWS::FIS::ExperimentTemplate'
+    Properties: 
+      Description: 'disrupt network connectivity for a specific subnet'
+      Actions: 
+        disruptAZConnectivity:
+          ActionId: 'aws:network:disrupt-connectivity'
+          Parameters:
+            scope: 'all' 
+            duration: !Sub PT${FISActionHours}H${FISActionMins}M${FISActionSecs}S
+          Targets:
+            Subnets: targetSubnets
+      Targets: 
+        targetSubnets:
+          ResourceType: 'aws:ec2:subnet'
+          SelectionMode: 'COUNT(1)'
+          ResourceArns:
+               - !Sub arn:${AWS::Partition}:ec2:${AWS::Region}:${AWS::AccountId}:subnet/${SubnetID}
+      StopConditions:
+        - Source: 'none'
+      Tags: 
+        Name: !Ref FISExperimentTemplateName
+      RoleArn: !GetAtt FISRole.Arn
+  FISRole:
+    Type: 'AWS::IAM::Role'
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement: 
+          - Effect: Allow
+            Principal:
+              Service: 'fis.amazonaws.com'
+            Action: 'sts:AssumeRole'
+      ManagedPolicyArns:
+           - !Ref FISNetworkManagedPolicy
+ 

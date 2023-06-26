@@ -1,0 +1,93 @@
+AWSTemplateFormatVersion: "2010-09-09"
+
+Description: AWS CloudFormation - aws fis experiment - ebs pause volume template.
+
+Metadata: 
+  AWS::CloudFormation::Interface: 
+    ParameterGroups: 
+      - 
+        Label: 
+          default: "Experiment & Volume Configuration"
+        Parameters: 
+          - FISExperimentTemplateName
+          - VolumeID
+          - FISEC2AccessManagedPolicy
+      - 
+        Label: 
+          default: "Experiment Duration Configuration"
+        Parameters: 
+          - FISActionHours
+          - FISActionMins
+          - FISActionSecs
+
+Parameters:
+     VolumeID:
+          Type: List<AWS::EC2::Volume::Id>
+          Description: ID of Volume
+
+     FISExperimentTemplateName:
+          Type: String
+          Description: Name of experiment template
+
+     FISEC2AccessManagedPolicy:
+        Type: String
+        Description: AWS Managed Policy
+        Default: arn:aws:iam::aws:policy/AmazonEC2FullAccess
+
+     FISActionHours:
+        Type: Number
+        Description: FIS Action Duration in hours
+        Default: 0
+        MinValue: 0
+        MaxValue: 11
+
+     FISActionMins:
+        Type: Number
+        Description: FIS Action Duration in minutes
+        Default: 2
+        MinValue: 0
+        MaxValue: 59
+
+     FISActionSecs:
+        Type: Number
+        Description: FIS Action Duration in seconds
+        Default: 0
+        MinValue: 0
+        MaxValue: 59
+
+Resources:
+  ExperimentTemplate:
+    Type: 'AWS::FIS::ExperimentTemplate'
+    Properties: 
+      Description: 'Pauses I/O operations on target EBS volumes'
+      Actions: 
+        pauseVolumeIO:
+          ActionId: 'aws:ebs:pause-volume-io'
+          Parameters:
+            duration: !Sub PT${FISActionHours}H${FISActionMins}M${FISActionSecs}S
+          Targets:
+            Volumes: targetEC2EBS
+      Targets: 
+        targetEC2EBS:
+          ResourceType: 'aws:ec2:ebs-volume'
+          SelectionMode: 'COUNT(5)'
+          ResourceArns:
+               - !Sub arn:${AWS::Partition}:ec2:${AWS::Region}:${AWS::AccountId}:volume/${VolumeID}
+      StopConditions:
+        - Source: 'none'
+      Tags: 
+        Name: !Ref FISExperimentTemplateName
+      RoleArn: !GetAtt FISRole.Arn
+  FISRole:
+    Type: 'AWS::IAM::Role'
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement: 
+          - Effect: Allow
+            Principal:
+              Service: 'fis.amazonaws.com'
+            Action: 'sts:AssumeRole'
+      ManagedPolicyArns:
+           - !Ref FISEC2AccessManagedPolicy
+ 
