@@ -22,7 +22,7 @@ Metadata:
 
 Parameters:
      VolumeID:
-          Type: List<AWS::EC2::Volume::Id>
+          Type: AWS::EC2::Volume::Id
           Description: ID of Volume
 
      FISExperimentTemplateName:
