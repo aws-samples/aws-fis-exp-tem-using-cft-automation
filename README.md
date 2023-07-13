@@ -44,7 +44,7 @@ CFT Name: awsfis_experiment template_stopstartec2.yaml
 
     FIS Action: aws:ec2:stop-instances
     Target Type: aws:ec2:instance
-    User Input: 1) Experiment Name 2) User should select instance from the list
+    User Input: 1) Experiment Name 2) User should select instance from the list 3) User should enter duration for which experiment should run (numeric)
 
 CFT Name: awsfis_experiment template_networkdisrupt.yaml
 
