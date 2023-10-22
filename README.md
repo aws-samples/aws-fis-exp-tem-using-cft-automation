@@ -11,6 +11,7 @@ Experiment Templates for the following Experiments are included in the CFN:
 * Network Disruption (Subnet) - Causing a disruption in network connectivity at the subnet level by blocking incoming and outgoing traffic to and from the subnet.
 * EBS IO Stuck - This will temporarily halt the input/output (IO) activity on all the underlying EBS volumes attached to the database server including root volumes.
 
+It also has an optional section with step by step instructions to change ebs volumes from gp2 to gp3 at scale.
 
 ## Prerequisites
 Before using these templates, make sure you have the following pre-requisites:
@@ -108,6 +109,25 @@ In the CloudFormation console
 * In the pop-up window, select Delete.
 * Wait for the stack to reach the DELETE_COMPLETE status. You need to periodically select Refresh to see the latest stack status.
 
+## Changing EBS volumes from GP2 to GP3 at scale (Optional - in case you have a requirement)
+When you modify an EBS volume from one type to another e.g. gp2 to gp3, or modify IOPS and throughput to an existing gp3 or io2 volume types, the volume and instance will continue to work, you do not need to restart the instance or detach the volume.
+
+Manually changing volumes is a repetitive process that can be prone to human error: Providing a script to automate the GP2 to GP3 volume conversion at scale. We can use AWS Cloudshell which is a browser-based shell with AWS CLI access from the AWS Management Console and execute the automation provided.
+
+* Download the script from the this link: modify_ebs_gp2_to_gp3 to a folder on your PC/laptop.
+* In AWS console, enter "cloudshell" in the search bar and select Cloudshell.
+* You should now see a dialog on AWS CloudShell, click on Close.
+* Click on Actions and click Upload File. 
+* Select the file downloaded from the folder
+* The file should get uploaded in the folder /home/cloudshell-user
+* Change the permissions of the file to run it as a program by executing command: chmod +x modify_ebs_gp2_to_gp3
+* Execute now the automation provided, the file ./modify_ebs_gp2_to_gp3 and have a look at the argument that are required to run it. You will see that the following arguments are required: --tag-key, --tag-value, --from-volume-type, --to-volume-type
+* Execute, **./modify_ebs_gp2_to_gp3 --tag-key Name --tag-value HANA-Data --from-volume-type gp2 --to-volume-type gp3**
+* and type yes. This will execute the automation script provided by the automation team and will target all gp2 volumes that have a tag Name=HANA-Data configured. Moreover, the automation script is checking the quota of EBS before starting the conversion to gp3. A disclaimer will appear, make sure you read it and write yes and press enter to accept it.
+* After you execute the automation script, you will see the output about the quota check and a json block for each volume that is being migrated. You can now go back to the Volumes list in the console and you will see that the HANA-data volumes have now migrated to gp3. Make sure you refresh the page if you do not see the volume on GP3 yet.
+
+Note: 
+When doing such migrations is very important to test it first in the dev environment, doing it a larger scale you will have to take into account the service quotas for modification of GP2 volumes, and for the total storage allocated for GP3. In any case, you do have the flexibility to go back to GP2 if needed, or you could stay with GP2 and ask the automation team to keep that into account in their automation.
 
 
 ## Security
