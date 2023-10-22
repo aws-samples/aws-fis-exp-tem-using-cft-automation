@@ -1,0 +1,143 @@
+#!/usr/bin/python3
+#make sure that you have enough quota in service quota:
+#example usage:
+#./modify_ebs.py --tag-key environment --tag-value dev --from-volume-type gp2 --to-volume-type gp3 --logging-level info --accept-disclaimer true
+#todo: make sure to run a describe-volume-status or something like this - to check if by any chance the volume is already in migrating state, if so, skip that migration
+#todo: crosscheck limits
+
+from pprint import pprint
+import logging
+import sys
+import argparse
+import boto3
+import time
+
+def print_disclaimer(args):
+    if not args['accept_disclaimer']:
+        answer = input('This script is for demonstration purposes only and has been created to use in conjunction with this workshop. Please refer to the workshop for additional information about this script.\nType "yes" if you want to continue with the migration\n')
+        if answer.lower() == 'yes' or answer.lower() == 'y':
+            return
+        else:
+            sys.exit(0)
+
+    return
+
+def create_parser():
+    myargparser = argparse.ArgumentParser(description="This script is a base for a generic migration volume script, currently only gp2 to gp3 is implemented, the script will check if you have enough quota to dothe migration, if quota is enough, it will then migrate all volumes, the script will require a tag, for instance environment=dev, example usage: ./modify_ebs.py --tag-key environment --tag-value dev --from-volume-type gp2 --to-volume-type gp3 --logging-level info ", )
+    myargparser.add_argument("--tag-key", type=str, help="i.e. environment", required=True)
+    myargparser.add_argument("--tag-value", type=str, help="i.e. dev",  required=True)
+    myargparser.add_argument("--from-volume-type",  type=str, help = "i.e. gp2", required=True)
+    myargparser.add_argument("--to-volume-type",  type=str, help = 'i.e. gp3', required=True)
+    myargparser.add_argument("--region",  type=str, help = 'i.e. us-east-1', default="us-east-1")
+    myargparser.add_argument("--logging-level",  type=str, help = 'choose from debug, info, warning, error', default="error")
+    #myargparser.add_argument("--dryrun",  type=bool, help = 'choose true or false', default=False)
+    #myargparser.add_argument("--linked-accounts",  nargs='+', help = 'i.e "012345678912,012345678913"', default="")
+    myargparser.add_argument("--accept-disclaimer",  type=bool, help = 'set this to True if you understand that you have limits in service quotas to crosscheck', default=False)
+
+    return myargparser
+
+def identify_candidate_volumes(ec2_client,args):
+    logging.info('entering identify_candidate_volumes function')
+    volumes = ec2_client.describe_volumes(Filters=[
+        {'Name': 'tag:' + args['tag_key'], 'Values': [args['tag_value']]},
+        {'Name': 'volume-type', 'Values' :  [args['from_volume_type']]}
+        ])
+    volumes_list=volumes['Volumes']
+    if volumes_list == []:
+        print("no volume to migrate, exiting")
+        sys.exit(1)
+    return volumes_list
+
+
+
+def identify_current_quota(volumes_list,args):
+    sq_client = boto3.client('service-quotas', region_name=args['region'])
+    quotas = sq_client.list_service_quotas(ServiceCode='ebs', MaxResults=100)
+    quotas = quotas['Quotas']
+#    quotas_required = [k,v for (k,v) in quotas if quotas.items() if]
+    relevant_quotas = []
+    for q in quotas:
+        if args['to_volume_type'] in q['QuotaName']:
+            relevant_quotas.append(q)
+    pprint(relevant_quotas)
+
+    return relevant_quotas
+
+
+
+def migrate_volume(ec2_client, volume, args):
+    if volume['VolumeType'] == 'gp2' and args['to_volume_type'] == 'gp3':
+
+        if volume['Size'] <= 170: #if volume size <= 170GB just do a simple migration
+            response = ec2_client.modify_volume(VolumeId=volume['VolumeId'], VolumeType=args['to_volume_type'])
+        if volume['Size'] > 170 : #if volume size > 170GB calculate the new IOPS, which would be maximum 16K IOPS, if less than 16K take the largest number between volume_size * 3 and 3000
+            if max(3*volume['Size'], 3000) > 16000:
+                new_iops = 16000
+            else:
+                new_iops = max(3*volume['Size'], 3000)
+
+            response = ec2_client.modify_volume(VolumeId=volume['VolumeId'], VolumeType=args['to_volume_type'], Iops=new_iops, Throughput=250 )
+    else:
+        return {"volume not gp2"}
+    return response
+
+def src_storage_used_in_GiB(volumes_list):
+    tot_src_storage_used = 0
+    for v in volumes_list:
+        tot_src_storage_used += v['Size']
+    return tot_src_storage_used
+
+
+def identify_dst_volumes_that_already_exists(ec2_client,volume_type):
+    logging.info('entering identify_candidate_volumes function')
+    volumes = ec2_client.describe_volumes(Filters=[
+        {'Name': 'volume-type', 'Values' :  [volume_type]}
+        ])
+    volumes_list=volumes['Volumes']
+    return volumes_list
+
+def dst_storage_already_used_in_GiB(args):
+    tot_storage_already_in_use = 0
+    ec2_client = boto3.client('ec2', region_name=args['region'])
+    volumes_list = identify_dst_volumes_that_already_exists(ec2_client,args['to_volume_type'])
+    for v in volumes_list:
+        tot_storage_already_in_use += v['Size']
+    return tot_storage_already_in_use
+
+
+def is_quota_enough(tot_quota_needed, current_quotas):
+    for q in current_quotas:
+        if q['Value'] * 1024 < tot_quota_needed:
+            print ("quota for %s is not enough, your current quota is %s GiB, you need a total of %s GiB" % (q['QuotaName'],q['Value'] * 1024, tot_quota_needed) )
+            sys.exit(1)
+            #return False
+    return True
+
+def main():
+    myargparser = create_parser()
+    args_orig = myargparser.parse_args()
+    args = vars(args_orig)
+    logging.basicConfig(stream=sys.stdout, level=args['logging_level'].upper())
+    logging.debug('running script: %s' % __file__ )
+    print_disclaimer(args)
+
+    logging.info('creating ec2 boto3 client')
+    ec2_client = boto3.client('ec2', region_name=args['region'])
+    volumes_list = identify_candidate_volumes(ec2_client,args)
+    #pprint(volumes_list)
+    current_quotas = identify_current_quota(volumes_list,args)
+
+    tot_src_storage_used = src_storage_used_in_GiB(volumes_list)
+    logging.info("total_storage_used %s is %s" % (args['from_volume_type'],tot_src_storage_used))
+
+    tot_dst_storage_already_in_use = dst_storage_already_used_in_GiB(args)
+    logging.info("total_storage_already_in_use %s is %s" % (args['to_volume_type'],tot_dst_storage_already_in_use))
+
+    tot_quota_needed = tot_src_storage_used + tot_dst_storage_already_in_use
+    logging.info("Total quotas needed for %s is %s" % (args['to_volume_type'], tot_quota_needed))
+    if is_quota_enough(tot_quota_needed, current_quotas):
+        for volume in volumes_list:
+            pprint(migrate_volume(ec2_client, volume, args))
+
+if __name__ == "__main__":
+    main()
